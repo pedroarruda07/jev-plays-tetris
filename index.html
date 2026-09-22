@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#101116" />
+    <title>JEV / Tetris</title>
+  </head>
+  <body>
+    <div id="app">
+      <main>
+        <div class="intro">
+          <div>
+            <p class="eyebrow"><span class="dot"></span> EXPERIMENT</p>
+            <h1>Jev. Tetris.</h1>
+          </div>
+          <button id="pause" class="quiet" type="button" aria-label="Pause game">
+            <span id="pause-icon" aria-hidden="true">Ⅱ</span>
+            <span id="pause-label">Pause</span><kbd>P</kbd>
+          </button>
+        </div>
+        <section class="game-layout" aria-label="Tetris game">
+          <aside class="left-panel">
+            <section class="panel score-panel" aria-label="Game score">
+              <h2>SCORE <span aria-hidden="true">↗</span></h2>
+              <div id="score" class="score">000000</div>
+              <div class="best">PERSONAL BEST <span id="best">0</span></div>
+              <div class="stats">
+                <div>
+                  <h2>LEVEL</h2>
+                  <strong id="level">01</strong>
+                </div>
+                <div>
+                  <h2>LINES</h2>
+                  <strong id="lines">00</strong>
+                </div>
+              </div>
+              <div class="progress" aria-label="Progress to next level">
+                <div id="progress"></div>
+              </div>
+              <p id="level-note" class="small">5 lines to the next level</p>
+            </section>
+            <section class="panel hold-panel" aria-label="Hold piece">
+              <h2>HOLD <kbd>C</kbd></h2>
+              <div id="hold" class="piece-preview"></div>
+              <p id="hold-note" class="small">Save something for later.</p>
+            </section>
+          </aside>
+          <div class="board-column">
+            <div class="board-top">
+              <span><i class="dot"></i> <span id="status">IN PLAY</span></span
+              ><span id="time">00:00</span>
+            </div>
+            <div class="board-wrap">
+              <div
+                id="board"
+                role="img"
+                aria-label="Tetris board, 10 columns by 20 rows"
+              ></div>
+              <div id="overlay" hidden>
+                <span class="eyebrow" id="overlay-label">TAKE A BREATHER</span>
+                <h2 id="overlay-title">Paused.</h2>
+                <p id="overlay-copy">Your next move can wait.</p>
+                <button id="continue" class="primary" type="button">
+                  <span id="continue-label">Keep playing</span
+                  ><span id="continue-icon" aria-hidden="true">→</span>
+                </button>
+              </div>
+            </div>
+            <div class="board-bottom">
+              <span id="board-note">Find a place for every piece.</span
+              ><span class="lock-track" aria-hidden="true"><span id="lock"></span></span>
+            </div>
+          </div>
+          <aside class="right-panel">
+            <section class="panel next-panel" aria-label="Next three pieces">
+              <h2>UP NEXT <span>03</span></h2>
+              <div id="next"></div>
+            </section>
+            <section class="controls" aria-label="Keyboard controls">
+              <h2>YOUR MOVES</h2>
+              <div>
+                <span>Move</span><span><kbd>←</kbd> <kbd>→</kbd></span>
+              </div>
+              <div><span>Rotate</span><kbd>↑</kbd></div>
+              <div><span>Soft drop</span><kbd>↓</kbd></div>
+              <div><span>Hard drop</span><kbd>SPACE</kbd></div>
+              <div><span>Hold piece</span><kbd>C</kbd></div>
+              <div><span>Pause</span><kbd>P</kbd></div>
+            </section>
+            <button id="restart" class="restart" type="button">
+              ↻ &nbsp; Start fresh
+            </button>
+          </aside>
+        </section>
+        <nav class="touch-controls" aria-label="Game controls">
+          <button data-action="hold" aria-label="Hold" type="button">C</button>
+          <button data-action="left" aria-label="Move left" type="button">←</button>
+          <button data-action="rotate" aria-label="Rotate clockwise" type="button">
+            ↻
+          </button>
+          <button data-action="right" aria-label="Move right" type="button">→</button>
+          <button data-action="softDrop" aria-label="Soft drop" type="button">↓</button>
+          <button data-action="hardDrop" aria-label="Hard drop" type="button">⤓</button>
+        </nav>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
