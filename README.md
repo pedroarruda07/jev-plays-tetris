@@ -38,6 +38,46 @@ The game uses a 10×20 board, seven colored tetrominoes, a Fisher–Yates 7-bag 
 
 Gravity starts at 1000ms per row and speeds up by 65ms every five lines, down to 150ms. Ground contact gives a 500ms lock delay. Movement and rotation do not reset that timer. Time off the ground suspends the lock timer. Hard drop locks immediately. Obstructed spawns and pieces locking above the board end the game.
 
+## Let Jev play
+
+Set `JEV_API_KEY` in the root `.env` file, then run `npm run dev`. Click **Let Jev play** or press `J` to start or stop autonomous play. Jev resumes a paused round and starts a fresh round if the previous game is over. It stops automatically at game over, on an API error, or when you pause, restart, or take manual control.
+
+The **Freeze while thinking** checkbox switches between two modes while playing:
+
+- Unchecked (default): normal gravity continues during requests. Replies for pieces that have already locked are discarded, and the selected action must still be legal before execution. The piece may have fallen since the request was sent.
+- Checked: gravity and the lock timer pause during each request. Game time advances in the 100ms interval between decisions. Changing the mode cancels the current request and gets a fresh decision.
+
+Only one decision is processed at a time. Each request contains a self-contained explanation of the game and strategy goal, the model-state snapshot, the previously executed Jev action (`null` before the first action), and descriptions of the currently available actions. The action with the highest returned probability is executed; ties use Jev's choice. The loop then captures the next state. Rate limits and overload responses use bounded retries with backoff; a decision times out after 30 seconds.
+
+Both the **terminal running Vite** and the **browser console** show each exact request body, raw response (including every probability), and selected action. The API key is read on the server and is never placed in the frontend bundle or logs. Keep the key named `JEV_API_KEY`, without a `VITE_` prefix. Optional `JEV_MODEL` defaults to `jev-latest`. Restart Vite after changing `.env`.
+
+```ts
+window.jev.start();
+window.jev.stop();
+window.jev.setFreezeWhileThinking(true);
+window.jev.getStatus();
+window.jev.getLastDecision(); // Request, raw response, probabilities, chosen action, timing.
+```
+
+The implementation is divided into small modules:
+
+| Module                  | Responsibility                                                      |
+| ----------------------- | ------------------------------------------------------------------- |
+| `src/jev/request.ts`    | Game description, goal, action descriptions, exact TypeSafe payload |
+| `src/jev/types.ts`      | Request, decision, and trace contracts                              |
+| `src/jev/validation.ts` | Validates model state received by the server                        |
+| `src/jev/response.ts`   | Validates probabilities and selects the maximum                     |
+| `server/jev-client.ts`  | Authenticated HTTP transport, retries, cancellation                 |
+| `server/jev-route.ts`   | Local API endpoint and terminal logging                             |
+| `src/jev/client.ts`     | Browser-to-server call and browser logging                          |
+| `src/jev/player.ts`     | Autonomous loop, stale replies, and timing modes                    |
+| `src/jev/controls.ts`   | Jev button, shortcut, and mode checkbox                             |
+| `vite.config.ts`        | Loads server environment and mounts the API for dev and preview     |
+
+This uses the [TypeSafe Choice API](https://docs.typesafe.ai/primitives/choice) at `POST https://api.typesafe.ai/v1/systemone`. `npm run build` builds the browser app; `npm run preview` runs it with the same server-side Jev route. Hosting only the static `dist/` files will require a separately deployed backend for `/api/jev/decision`.
+
+`npm run jev:check` makes **one real API request** using your key, logs the trace, and applies its action to an in-memory game. It consumes API usage. The ordinary `npm test` suite uses mocked requests and does not contact TypeSafe AI.
+
 ## Engine and automation API
 
 `src/game.ts` has no DOM dependencies. `GameState` includes the board, active piece, next queue, remaining bag, hold slot and eligibility, status, score, lines, level, pieces placed, and all timers. Coordinates start at the upper left; active pieces can extend above the board with negative Y coordinates.

@@ -1,4 +1,35 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+.jev-panel {
+  margin-bottom: 18px;
+}
+.jev-panel .primary {
+  width: 100%;
+  margin-top: 0;
+}
+.jev-setting {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 15px;
+  color: #bdc0cb;
+  font-size: 11px;
+}
+.jev-setting input {
+  accent-color: var(--accent);
+}
+#jev-status {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 710px) {
+  .left-panel {
+    flex-wrap: wrap;
+  }
+  .jev-panel {
+    width: 100%;
+    margin-bottom: 0;
+  }
+}
 :root {
   font-family: 'DM Sans', sans-serif;
   color: #e9e9ec;

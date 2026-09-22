@@ -21,6 +21,15 @@
         </div>
         <section class="game-layout" aria-label="Tetris game">
           <aside class="left-panel">
+            <section class="panel jev-panel" aria-label="Jev player">
+              <button id="jev-toggle" class="primary" type="button" aria-pressed="false">
+                Let Jev play · J
+              </button>
+              <label class="jev-setting"
+                ><input id="jev-freeze" type="checkbox" /> Freeze while thinking</label
+              >
+              <p id="jev-status" class="small" role="status">Ready for Jev.</p>
+            </section>
             <section class="panel score-panel" aria-label="Game score">
               <h2>SCORE <span aria-hidden="true">↗</span></h2>
               <div id="score" class="score">000000</div>

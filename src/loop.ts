@@ -10,6 +10,7 @@ export class GameLoop {
   constructor(
     private readonly game: TetrisGame,
     private readonly controls: GameControls,
+    private readonly isClockSuspended: () => boolean = () => false,
   ) {}
 
   start(): void {
@@ -30,7 +31,7 @@ export class GameLoop {
     const deltaMs = Math.min(now - this.previousFrameAt, MAX_FRAME_DELTA_MS);
     this.previousFrameAt = now;
 
-    if (this.game.getState().status === 'playing') {
+    if (this.game.getState().status === 'playing' && !this.isClockSuspended()) {
       this.controls.dispatchRepeats(now);
       this.game.dispatch({ type: 'tick', deltaMs });
     } else {

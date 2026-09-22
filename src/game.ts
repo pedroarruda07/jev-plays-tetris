@@ -15,8 +15,8 @@ export const PLAYER_ACTIONS: readonly PlayerAction[] = [
   'left',
   'right',
   'rotate',
-  'softDrop',
-  'hardDrop',
+  // 'softDrop',
+  // 'hardDrop',
   'hold',
 ];
 export type GameAction =
@@ -347,7 +347,7 @@ export function modelGameState(state: GameState): ModelGameState {
 
 export class TetrisGame {
   private state: GameState;
-  private listeners = new Set<(state: GameState) => void>();
+  private listeners = new Set<(state: GameState, action?: GameAction) => void>();
   constructor(private random: Random = Math.random) {
     this.state = createInitialState(random);
   }
@@ -362,10 +362,10 @@ export class TetrisGame {
   }
   dispatch(action: GameAction): GameState {
     this.state = reduceGame(this.state, action, this.random);
-    for (const listener of this.listeners) listener(this.getState());
+    for (const listener of this.listeners) listener(this.getState(), action);
     return this.getState();
   }
-  subscribe(listener: (state: GameState) => void): () => void {
+  subscribe(listener: (state: GameState, action?: GameAction) => void): () => void {
     this.listeners.add(listener);
     listener(this.getState());
     return () => {
