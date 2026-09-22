@@ -1,7 +1,6 @@
 export const WIDTH = 10;
 export const HEIGHT = 20;
 export const LOCK_DELAY = 500;
-export const MAX_LOCK_RESETS = 15;
 export const TYPES = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'] as const;
 export type PieceType = (typeof TYPES)[number];
 export type Cell = PieceType | null;
@@ -38,8 +37,23 @@ export interface GameState {
   elapsedMs: number;
   gravityElapsedMs: number;
   lockElapsedMs: number;
-  lockResets: number;
   lastClear: number;
+}
+export interface ModelActivePiece {
+  type: PieceType;
+  cells: Position[];
+}
+export interface ModelGameState {
+  board: Cell[][];
+  active: ModelActivePiece | null;
+  next: PieceType[];
+  hold: PieceType | null;
+  canHold: boolean;
+  score: number;
+  lines: number;
+  level: number;
+  lockElapsedMs: number;
+  availableActions: PlayerAction[];
 }
 export type Random = () => number;
 const SHAPES: Record<PieceType, readonly string[]> = {
@@ -106,7 +120,6 @@ function spawn(state: GameState, random: Random, held?: PieceType): void {
   };
   state.gravityElapsedMs = 0;
   state.lockElapsedMs = 0;
-  state.lockResets = 0;
   if (!fits(state, state.active)) state.status = 'gameOver';
 }
 export function createInitialState(random: Random = Math.random): GameState {
@@ -125,7 +138,6 @@ export function createInitialState(random: Random = Math.random): GameState {
     elapsedMs: 0,
     gravityElapsedMs: 0,
     lockElapsedMs: 0,
-    lockResets: 0,
     lastClear: 0,
   };
   while (state.next.length < 3) state.next.push(draw(state, random));
@@ -218,7 +230,6 @@ const I_KICKS: Position[][] = [
 function move(state: GameState, action: PlayerAction): boolean {
   const active = state.active;
   if (!active) return false;
-  const grounded = isGrounded(state);
   let candidate: Piece | undefined;
   if (action === 'rotate') {
     if (active.type === 'O') return false;
@@ -241,10 +252,6 @@ function move(state: GameState, action: PlayerAction): boolean {
   }
   if (!candidate) return false;
   state.active = candidate;
-  if (action !== 'softDrop' && grounded && state.lockResets < MAX_LOCK_RESETS) {
-    state.lockElapsedMs = 0;
-    state.lockResets++;
-  }
   return true;
 }
 function tick(state: GameState, deltaMs: number, random: Random): void {
@@ -316,6 +323,28 @@ export function availableActions(state: GameState): PlayerAction[] {
     return move(structuredClone(state), action);
   });
 }
+
+/** A compact, detached snapshot intended to be sent to a model. */
+export function modelGameState(state: GameState): ModelGameState {
+  return {
+    board: state.board.map((row) => [...row]),
+    active: state.active
+      ? {
+          type: state.active.type,
+          cells: cells(state.active),
+        }
+      : null,
+    next: [...state.next],
+    hold: state.hold,
+    canHold: state.canHold,
+    score: state.score,
+    lines: state.lines,
+    level: state.level,
+    lockElapsedMs: state.lockElapsedMs,
+    availableActions: availableActions(state),
+  };
+}
+
 export class TetrisGame {
   private state: GameState;
   private listeners = new Set<(state: GameState) => void>();
@@ -327,6 +356,9 @@ export class TetrisGame {
   }
   getAvailableActions(): PlayerAction[] {
     return availableActions(this.state);
+  }
+  getModelState(): ModelGameState {
+    return modelGameState(this.state);
   }
   dispatch(action: GameAction): GameState {
     this.state = reduceGame(this.state, action, this.random);

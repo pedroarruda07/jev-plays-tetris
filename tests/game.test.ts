@@ -110,27 +110,14 @@ describe('Tetris rules', () => {
     next = reduceGame(next, { type: 'tick', deltaMs: 1 });
     expect(next.active!.y).toBe(state.active!.y + 1);
   });
-  it('gives 500ms lock delay and resets on successful movement', () => {
+  it('gives 500ms lock delay without resetting after movement', () => {
     let state = initial();
     state.active = ghostPiece(state);
     state = reduceGame(state, { type: 'tick', deltaMs: 499 });
     expect(state.piecesPlaced).toBe(0);
     state = reduceGame(state, { type: 'left' });
-    expect(state.lockElapsedMs).toBe(0);
-    state = reduceGame(state, { type: 'tick', deltaMs: 499 });
-    expect(state.piecesPlaced).toBe(0);
+    expect(state.lockElapsedMs).toBe(499);
     expect(reduceGame(state, { type: 'tick', deltaMs: 1 }).piecesPlaced).toBe(1);
-  });
-  it('caps lock resets at 15', () => {
-    let state = initial();
-    state.active = ghostPiece(state);
-    for (let i = 0; i < 16; i++) {
-      state = reduceGame(state, { type: 'tick', deltaMs: 10 });
-      state = reduceGame(state, { type: i % 2 ? 'right' : 'left' });
-    }
-    expect(state.lockResets).toBe(15);
-    expect(state.lockElapsedMs).toBe(10);
-    expect(reduceGame(state, { type: 'tick', deltaMs: 490 }).piecesPlaced).toBe(1);
   });
   it('processes elapsed time independently of frame frequency', () => {
     const state = initial();

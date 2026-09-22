@@ -181,9 +181,7 @@ export class GameView {
     getElement('overlay-title').textContent =
       state.status === 'gameOver' ? 'Stacked out.' : 'Paused.';
     getElement('overlay-copy').textContent =
-      state.status === 'gameOver'
-        ? `${state.score.toLocaleString()} points.`
-        : '';
+      state.status === 'gameOver' ? `${state.score.toLocaleString()} points.` : '';
     getElement('continue-label').textContent =
       state.status === 'gameOver' ? 'Play again' : 'Keep playing';
     getElement('continue-icon').textContent = state.status === 'gameOver' ? '↗' : '→';

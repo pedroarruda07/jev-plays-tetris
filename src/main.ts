@@ -1,10 +1,12 @@
 import './style.css';
+import { GameDebugLogger } from './debug';
 import { TetrisGame } from './game';
 import { GameControls } from './input';
 import { GameLoop } from './loop';
 import { GameView } from './ui';
 
 const game = new TetrisGame();
+const debugLogger = new GameDebugLogger(game);
 
 declare global {
   interface Window {
@@ -23,6 +25,7 @@ window.addEventListener(
   () => {
     loop.stop();
     controls.dispose();
+    debugLogger.dispose();
   },
   { once: true },
 );
