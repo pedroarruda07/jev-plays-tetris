@@ -1,5 +1,12 @@
 import { HEIGHT, LOCK_DELAY, PLAYER_ACTIONS, TYPES, WIDTH } from '../game';
-import type { ModelGameState, PieceType, PlayerAction, Position } from '../game';
+import { MAX_PLACEMENTS, type PlacementOption } from '../placements';
+import type {
+  ModelActivePiece,
+  ModelGameState,
+  PieceType,
+  PlayerAction,
+  Position,
+} from '../game';
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -27,12 +34,81 @@ function isPosition(value: unknown): value is Position {
   );
 }
 
+function isModelPiece(value: unknown): value is ModelActivePiece {
+  return (
+    isRecord(value) &&
+    isPieceType(value.type) &&
+    Array.isArray(value.cells) &&
+    value.cells.length === 4 &&
+    value.cells.every(isPosition) &&
+    new Set(value.cells.map((position: Position) => `${position.x},${position.y}`))
+      .size === 4
+  );
+}
+
+/** Candidate consequences come from the browser's planner; never accept executable paths. */
+export function parsePlacements(value: unknown): PlacementOption[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_PLACEMENTS) {
+    throw new Error('Expected 1 to 255 placement options.');
+  }
+  const ids = new Set<string>();
+  return value.map((item: unknown) => {
+    if (
+      !isRecord(item) ||
+      typeof item.id !== 'string' ||
+      !/^p_(active|hold)_[IOTSZJL]_(?:\d_-?\d{1,2}_){3}\d_-?\d{1,2}$/.test(item.id) ||
+      ids.has(item.id) ||
+      typeof item.usesHold !== 'boolean' ||
+      !isModelPiece(item.landing) ||
+      !integer(item.linesCleared, 4) ||
+      !integer(item.scoreGain, 800) ||
+      typeof item.gameOver !== 'boolean' ||
+      !isRecord(item.metrics) ||
+      !integer(item.metrics.holes, WIDTH * HEIGHT) ||
+      !integer(item.metrics.maxHeight, HEIGHT) ||
+      !integer(item.metrics.aggregateHeight, WIDTH * HEIGHT) ||
+      !integer(item.metrics.bumpiness, (WIDTH - 1) * HEIGHT) ||
+      !Array.isArray(item.metrics.columnHeights) ||
+      item.metrics.columnHeights.length !== WIDTH ||
+      !item.metrics.columnHeights.every((height: unknown) => integer(height, HEIGHT)) ||
+      !Array.isArray(item.boardAfter) ||
+      item.boardAfter.length !== HEIGHT ||
+      !item.boardAfter.every(
+        (row: unknown) => typeof row === 'string' && /^[.IOTSZJL]{10}$/.test(row),
+      )
+    ) {
+      throw new Error('Invalid placement option.');
+    }
+    ids.add(item.id);
+    return {
+      id: item.id,
+      usesHold: item.usesHold,
+      landing: {
+        type: item.landing.type,
+        cells: item.landing.cells.map(({ x, y }) => ({ x, y })),
+      },
+      linesCleared: item.linesCleared,
+      scoreGain: item.scoreGain,
+      gameOver: item.gameOver,
+      metrics: {
+        holes: item.metrics.holes,
+        maxHeight: item.metrics.maxHeight,
+        aggregateHeight: item.metrics.aggregateHeight,
+        bumpiness: item.metrics.bumpiness,
+        columnHeights: [...item.metrics.columnHeights] as number[],
+      },
+      boardAfter: [...item.boardAfter] as string[],
+    };
+  });
+}
+
 /** Validate at the HTTP boundary and copy only model-visible fields. */
 export function parseModelState(value: unknown): ModelGameState {
   if (!isRecord(value)) throw new Error('Expected a model state object.');
   const {
     board,
     active,
+    ghost,
     next,
     hold,
     canHold,
@@ -53,15 +129,11 @@ export function parseModelState(value: unknown): ModelGameState {
     )
   )
     throw new Error('Invalid 10 by 20 board.');
-  if (
-    !isRecord(active) ||
-    !isPieceType(active.type) ||
-    !Array.isArray(active.cells) ||
-    active.cells.length !== 4 ||
-    !active.cells.every(isPosition) ||
-    new Set(active.cells.map((p: Position) => `${p.x},${p.y}`)).size !== 4
-  )
+  if (!isModelPiece(active))
     throw new Error('Expected an active tetromino with four distinct cells.');
+  if (!isModelPiece(ghost) || ghost.type !== active.type) {
+    throw new Error('Expected a matching ghost tetromino with four distinct cells.');
+  }
   if (!Array.isArray(next) || next.length !== 3 || !next.every(isPieceType)) {
     throw new Error('Expected three next pieces.');
   }
@@ -92,6 +164,10 @@ export function parseModelState(value: unknown): ModelGameState {
     active: {
       type: active.type,
       cells: active.cells.map((p: Position) => ({ x: p.x, y: p.y })),
+    },
+    ghost: {
+      type: ghost.type,
+      cells: ghost.cells.map((p: Position) => ({ x: p.x, y: p.y })),
     },
     next: [...next],
     hold,

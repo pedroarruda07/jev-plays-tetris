@@ -1,4 +1,5 @@
-import type { ModelGameState, PlayerAction } from '../game';
+import type { ModelGameState } from '../game';
+import { MAX_PLACEMENTS, type PlacementOption } from '../placements';
 import type { JevRequest } from './types';
 
 export const GAME_DESCRIPTION = [
@@ -18,19 +19,29 @@ export const GAME_DESCRIPTION = [
   'board[y][x] contains only locked blocks (tetromino letters) or null for empty cells.',
   'active contains the type and absolute coordinates of all four falling cells;',
   'negative y coordinates are above the visible board.',
+  'ghost contains the active piece at the lowest position it would reach by falling straight',
+  'down with no further horizontal movement or rotation. Its four cells are the projected',
+  'landing position if nothing about the placement changes; it is not a second real piece.',
   'A 7-bag randomizer supplies one of each shape before reshuffling. next lists the next',
   'three pieces in spawn order. hold is the saved piece, and canHold says whether hold is',
   'currently legal; hold can be used only once before the active piece locks.',
-  'availableActions contains the only legal inputs Jev may choose for this decision.',
-  'previousAction is the last input Jev successfully executed in this autoplay session;',
-  'null means it has not executed one yet. It is history, not an input waiting to run.',
+  'Your choices are final placements, not individual movement buttons. placements lists',
+  'reachable landings calculated by the game engine.',
+  'Each placement has an id, usesHold, landing (type and four coordinates before rows clear),',
+  'linesCleared, scoreGain, gameOver, metrics, and boardAfter. usesHold means exchanging the',
+  'current piece with hold (or next when hold is empty) before placing it.',
+  'boardAfter uses 20 strings of 10 cells, top to bottom: dot is empty; letters are locked cells.',
+  'Metrics describe that board AFTER line clearing: holes are empty cells below locked cells;',
+  'columnHeights are heights from the floor; maxHeight is their maximum; aggregateHeight is',
+  'their sum; bumpiness is the sum of absolute differences between neighboring column heights.',
+  'gameOver includes both locking above the top and obstructing the next spawn.',
   'Clearing 1/2/3/4 rows at once earns',
   '100/300/500/800 points, with no drop, combo, T-spin or level multiplier bonuses.',
   'Gravity starts at one row per second and speeds up by 65ms every five lines.',
   'lockElapsedMs is time already used from that delay.',
   'The game ends if a new piece cannot spawn without overlap or a piece locks with cells',
-  'above the visible top. Each response selects one immediate input; after execution, Jev',
-  'receives a new state and may need several successive inputs to position one piece.',
+  'above the visible top. Select one supplied placement id. The controller handles the legal',
+  'movement, rotation, hold and soft-drop path, then lets the normal lock delay finish.',
 ].join(' ');
 
 export const GAME_GOAL = [
@@ -42,63 +53,63 @@ export const GAME_GOAL = [
   'cells above them), deep narrow gaps that the available shapes cannot reach, tall isolated',
   'columns, and overhangs that trap empty space. Use the next-three preview and hold slot to',
   'plan beyond the active piece. Give highest priority to avoiding imminent game over, then',
-  'to clearing rows and reducing holes, stack height, and surface unevenness. Gravity and the',
-  'lock timer place pieces automatically, so choose the best available movement, rotation, or',
-  'hold input for the current snapshot and use later decisions for further inputs.',
+  'to clearing rows and reducing holes, stack height, and surface unevenness.',
+  'Compare the supplied resulting boards and measured consequences. Avoid gameOver placements',
+  'whenever a surviving option exists. Use next and hold to judge future flexibility.',
+  'The ghost is only the current straight-down landing; it has no preference over alternatives.',
 ].join(' ');
-
-export const JEV_ACTIONS: readonly PlayerAction[] = [
-  'left',
-  'right',
-  'rotate',
-  'hold',
-  // 'softDrop',
-  // 'hardDrop',
-];
-
-export const ACTION_DESCRIPTIONS: Readonly<Partial<Record<PlayerAction, string>>> = {
-  left: 'Move the falling piece exactly one column left, without changing its rotation.',
-  right:
-    'Move the falling piece exactly one column right, without changing its rotation.',
-  rotate: 'Rotate the falling piece 90 degrees clockwise, applying wall kicks if needed.',
-  // softDrop:
-  //   'Move the falling piece exactly one row down. This does not force it to lock.',
-  // hardDrop:
-  //   'Drop to the lowest reachable position in the current column and rotation, then lock immediately.',
-  hold: 'Save the falling piece and spawn the held piece (or next piece if hold is empty) in its initial rotation. Hold then becomes unavailable until a piece locks.',
-};
-
-export function getJevAvailableActions(state: ModelGameState): PlayerAction[] {
-  return state.availableActions.filter((action) => JEV_ACTIONS.includes(action));
-}
 
 /** This object is the exact JSON body sent to TypeSafe AI. */
 export function buildJevRequest(
   state: ModelGameState,
   model = 'jev-latest',
   freezeWhileThinking = false,
-  previousAction: PlayerAction | null = null,
+  placements: readonly PlacementOption[] = [],
 ): JevRequest {
-  const availableActions = getJevAvailableActions(state);
-  if (!state.active || availableActions.length === 0) {
-    throw new Error('Jev needs an active piece and at least one legal action.');
+  if (!state.active) throw new Error('Jev needs an active piece.');
+  if (
+    !placements.length ||
+    placements.length > MAX_PLACEMENTS ||
+    new Set(placements.map(({ id }) => id)).size !== placements.length
+  ) {
+    throw new Error('Jev needs 1 to 255 distinct reachable placements.');
   }
-  const context = { ...structuredClone(state), availableActions, previousAction };
+  const snapshot = structuredClone(state);
+  const context = {
+    board: snapshot.board,
+    active: snapshot.active,
+    ghost: snapshot.ghost,
+    next: snapshot.next,
+    hold: snapshot.hold,
+    canHold: snapshot.canHold,
+    score: snapshot.score,
+    lines: snapshot.lines,
+    level: snapshot.level,
+    lockElapsedMs: snapshot.lockElapsedMs,
+    placements: structuredClone([...placements]),
+  };
   return {
     model,
     state: { game: GAME_DESCRIPTION, goal: GAME_GOAL, context },
     questions: {
-      nextAction: {
+      nextPlacement: {
         type: 'choice',
         instructions:
-          'Which single legal action should be executed next to best advance the game goal ' +
-          'from this exact state? Choose among the supplied actions; this is one immediate ' +
-          'input, not an entire placement plan. ' +
+          'Which supplied final placement best advances the game goal? Compare gameOver, ' +
+          'linesCleared, scoreGain, holes, height, bumpiness, and the resulting board. ' +
+          'Select its id; the controller executes the path. ' +
           (freezeWhileThinking
-            ? 'The game clock is frozen during this decision and advances between decisions.'
-            : 'Gravity continues during the decision; the falling piece may be lower by execution time.'),
+            ? 'The game clock is frozen during this decision and resumes for execution and locking.'
+            : 'Gravity continues during the decision; the controller rechecks reachability before execution.'),
         criteria: Object.fromEntries(
-          availableActions.map((action) => [action, ACTION_DESCRIPTIONS[action]!]),
+          placements.map((placement) => [
+            placement.id,
+            `${placement.usesHold ? 'Use hold, then place' : 'Place'} ${placement.landing.type} at ` +
+              `${JSON.stringify(placement.landing.cells)}. Clears ${placement.linesCleared} rows; ` +
+              `gains ${placement.scoreGain} points; gameOver=${placement.gameOver}; ` +
+              `holes=${placement.metrics.holes}; maxHeight=${placement.metrics.maxHeight}; ` +
+              `aggregateHeight=${placement.metrics.aggregateHeight}; bumpiness=${placement.metrics.bumpiness}.`,
+          ]),
         ),
       },
     },

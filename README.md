@@ -44,39 +44,46 @@ Set `JEV_API_KEY` in the root `.env` file, then run `npm run dev`. Click **Let J
 
 The **Freeze while thinking** checkbox switches between two modes while playing:
 
-- Unchecked (default): normal gravity continues during requests. Replies for pieces that have already locked are discarded, and the selected action must still be legal before execution. The piece may have fallen since the request was sent.
-- Checked: gravity and the lock timer pause during each request. Game time advances in the 100ms interval between decisions. Changing the mode cancels the current request and gets a fresh decision.
+- Unchecked (default): normal gravity continues during requests. Replies for pieces that have already locked are discarded. The controller finds a fresh path to the chosen landing from the current position; if it is no longer reachable, it requests a new decision.
+- Checked: gravity and the lock timer pause during each request, then resume for execution and locking. Changing the mode cancels the current request and gets a fresh decision.
 
-Only one decision is processed at a time. Each request contains a self-contained explanation of the game and strategy goal, the model-state snapshot, the previously executed Jev action (`null` before the first action), and descriptions of the currently available actions. The action with the highest returned probability is executed; ties use Jev's choice. The loop then captures the next state. Rate limits and overload responses use bounded retries with backoff; a decision times out after 30 seconds.
+Jev chooses a **final placement** for each piece. The local planner searches legal paths using left, right, clockwise rotation with wall kicks, soft drop, and optional hold. Each option includes its landing cells, resulting board, rows cleared, score gained, game-over flag, holes, column heights, maximum height, total height, and surface unevenness. Measurements are taken after line clearing. The request also contains the game rules and goal, model state, and ghost. Jev selects a placement ID through the TypeSafe Choice API; every option's probability is retained.
 
-Both the **terminal running Vite** and the **browser console** show each exact request body, raw response (including every probability), and selected action. The API key is read on the server and is never placed in the frontend bundle or logs. Keep the key named `JEV_API_KEY`, without a `VITE_` prefix. Optional `JEV_MODEL` defaults to `jev-latest`. Restart Vite after changing `.env`.
+The controller rechecks reachability and executes the chosen path one normal game input at a time, with 60ms between inputs so movement is visible. It replans between inputs to account for gravity, then waits for the normal lock timer. It does not ask for another placement until the piece locks, unless the plan becomes invalid or the timing mode changes. No hard-drop input is used. Only one model request is pending at a time. Rate limits and overload responses use bounded retries with backoff; a decision times out after 30 seconds.
+
+Equivalent landings are deduplicated, with hold and non-hold options kept distinct. Search keeps cells at or below y = -4, matching the model-state boundary. If more than 255 placements are reachable, the API limit is met by prioritizing survival, line clears, fewer holes, lower height, and a smoother surface. Otherwise every reachable placement is offered. Consequences cover the current placement and the next spawn; they do not predict a full future game.
+
+Both the **terminal running Vite** and the **browser console** show each exact request body, raw response (including every probability), and selected placement. Candidate boards use one string per row, with a dot for an empty cell. The API key is read on the server and is never placed in the frontend bundle or logs. Keep the key named `JEV_API_KEY`, without a `VITE_` prefix. Optional `JEV_MODEL` defaults to `jev-latest`. Restart Vite after changing `.env`.
 
 ```ts
 window.jev.start();
 window.jev.stop();
 window.jev.setFreezeWhileThinking(true);
 window.jev.getStatus();
-window.jev.getLastDecision(); // Request, raw response, probabilities, chosen action, timing.
+window.jev.getLastDecision(); // Request with placements, raw response, probabilities, placement ID, timing.
 ```
 
 The implementation is divided into small modules:
 
-| Module                  | Responsibility                                                      |
-| ----------------------- | ------------------------------------------------------------------- |
-| `src/jev/request.ts`    | Game description, goal, action descriptions, exact TypeSafe payload |
-| `src/jev/types.ts`      | Request, decision, and trace contracts                              |
-| `src/jev/validation.ts` | Validates model state received by the server                        |
-| `src/jev/response.ts`   | Validates probabilities and selects the maximum                     |
-| `server/jev-client.ts`  | Authenticated HTTP transport, retries, cancellation                 |
-| `server/jev-route.ts`   | Local API endpoint and terminal logging                             |
-| `src/jev/client.ts`     | Browser-to-server call and browser logging                          |
-| `src/jev/player.ts`     | Autonomous loop, stale replies, and timing modes                    |
-| `src/jev/controls.ts`   | Jev button, shortcut, and mode checkbox                             |
-| `vite.config.ts`        | Loads server environment and mounts the API for dev and preview     |
+| Module                  | Responsibility                                                    |
+| ----------------------- | ----------------------------------------------------------------- |
+| `src/placements.ts`     | Reachable landing search, paths, and simulated outcomes           |
+| `src/board-metrics.ts`  | Holes, heights, and surface unevenness                            |
+| `src/jev/execution.ts`  | Replan from live state and execute checked inputs                 |
+| `src/jev/request.ts`    | Game description, goal, placement choices, exact TypeSafe payload |
+| `src/jev/types.ts`      | Request, decision, and trace contracts                            |
+| `src/jev/validation.ts` | Validates model state received by the server                      |
+| `src/jev/response.ts`   | Validates probabilities and selects the maximum                   |
+| `server/jev-client.ts`  | Authenticated HTTP transport, retries, cancellation               |
+| `server/jev-route.ts`   | Local API endpoint and terminal logging                           |
+| `src/jev/client.ts`     | Browser-to-server call and browser logging                        |
+| `src/jev/player.ts`     | Autonomous loop, stale replies, and timing modes                  |
+| `src/jev/controls.ts`   | Jev button, shortcut, and mode checkbox                           |
+| `vite.config.ts`        | Loads server environment and mounts the API for dev and preview   |
 
 This uses the [TypeSafe Choice API](https://docs.typesafe.ai/primitives/choice) at `POST https://api.typesafe.ai/v1/systemone`. `npm run build` builds the browser app; `npm run preview` runs it with the same server-side Jev route. Hosting only the static `dist/` files will require a separately deployed backend for `/api/jev/decision`.
 
-`npm run jev:check` makes **one real API request** using your key, logs the trace, and applies its action to an in-memory game. It consumes API usage. The ordinary `npm test` suite uses mocked requests and does not contact TypeSafe AI.
+`npm run jev:check` makes **one real API request** using your key, logs the trace, and executes its selected placement in an in-memory game. It consumes API usage. The ordinary `npm test` suite uses mocked requests and does not contact TypeSafe AI.
 
 ## Engine and automation API
 

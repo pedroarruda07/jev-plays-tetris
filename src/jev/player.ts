@@ -1,15 +1,18 @@
 import {
   PLAYER_ACTIONS,
   type GameAction,
+  type GameState,
   type PlayerAction,
   type TetrisGame,
 } from '../game';
 import { requestJevDecision } from './client';
+import { placementOptions, planPlacements } from '../placements';
+import { executePlacement } from './execution';
 import type { Decide, JevTrace } from './types';
 
 export interface JevPlayerStatus {
   running: boolean;
-  phase: 'idle' | 'thinking' | 'waiting' | 'error' | 'gameOver';
+  phase: 'idle' | 'thinking' | 'executing' | 'waiting' | 'error' | 'gameOver';
   freezeWhileThinking: boolean;
   message: string;
 }
@@ -27,11 +30,10 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-/** One request, one validated action, then a fresh snapshot. No overlapping decisions. */
+/** One placement decision per piece, followed by local execution and natural locking. */
 export class JevPlayer {
   private runController: AbortController | null = null;
   private lastDecision: JevTrace | null = null;
-  private previousAction: PlayerAction | null = null;
   private applyingAction = false;
   private readonly listeners = new Set<(status: JevPlayerStatus) => void>();
   private readonly unsubscribe: () => void;
@@ -89,16 +91,15 @@ export class JevPlayer {
     if (resume) this.stop('Changing timing mode.');
     this.status.freezeWhileThinking = enabled;
     this.emit();
-    if (resume) this.begin(false);
+    if (resume) this.begin();
   }
 
   start(): void {
-    this.begin(true);
+    this.begin();
   }
 
-  private begin(resetPreviousAction: boolean): void {
+  private begin(): void {
     if (this.status.running) return;
-    if (resetPreviousAction) this.previousAction = null;
     this.applyingAction = true;
     try {
       const current = this.game.getState();
@@ -138,39 +139,54 @@ export class JevPlayer {
         this.status.phase = 'thinking';
         this.status.message = 'Jev is deciding…';
         this.emit();
+        const placements = placementOptions(planPlacements(before));
+        if (!placements.length)
+          throw new Error('No reachable placements for the active piece.');
         const trace = await this.decide(
           this.game.getModelState(),
           signal,
           this.status.freezeWhileThinking,
-          this.previousAction,
+          placements,
         );
         if (signal.aborted || this.runController !== controller) return;
         this.lastDecision = structuredClone(trace);
         const current = this.game.getState();
         if (current.status !== 'playing') return;
-        if (
-          current.piecesPlaced !== before.piecesPlaced ||
-          !this.game.getAvailableActions().includes(trace.decision.action)
-        ) {
+        if (current.piecesPlaced !== before.piecesPlaced) {
+          this.status.phase = 'waiting';
           this.status.message = 'State changed; asking Jev again.';
-          console.info(
-            `[Jev ${trace.id}] Discarded: piece locked or action no longer legal.`,
-          );
-        } else {
-          this.applyingAction = true;
-          try {
-            this.game.dispatch({ type: trace.decision.action });
-            this.previousAction = trace.decision.action;
-          } finally {
-            this.applyingAction = false;
-          }
-          console.info(`[Jev ${trace.id}] Executed ${trace.decision.action}.`);
-          if (signal.aborted) return;
-          this.status.message = `Jev: ${trace.decision.action}`;
+          this.emit();
+          await wait(this.decisionDelayMs, signal);
+          continue;
         }
+        const target = placements.find(({ id }) => id === trace.decision.placementId);
+        if (!target) throw new Error('Jev selected an unoffered placement.');
+        this.status.phase = 'executing';
+        this.status.message = "Moving to Jev's placement.";
+        this.emit();
+        const executed = await executePlacement(
+          this.game,
+          target,
+          before.piecesPlaced,
+          signal,
+          { dispatch: this.dispatchPlannedAction },
+        );
+        if (signal.aborted) return;
+        this.status.message = executed
+          ? 'Placement reached; waiting for lock.'
+          : 'State changed; asking Jev again.';
+        console.info(
+          `[Jev ${trace.id}] ${executed ? 'Executed' : 'Discarded'} placement ${target.id}.`,
+        );
         this.status.phase = 'waiting';
         this.emit();
-        await wait(this.decisionDelayMs, signal);
+        do {
+          await wait(this.decisionDelayMs, signal);
+        } while (
+          executed &&
+          !signal.aborted &&
+          this.game.getState().piecesPlaced === before.piecesPlaced
+        );
       }
     } catch (error) {
       if (signal.aborted || this.runController !== controller) return;
@@ -182,9 +198,20 @@ export class JevPlayer {
 
   private isManualAction(action: GameAction): boolean {
     return (
-      action.type === 'restart' || PLAYER_ACTIONS.some((type) => type === action.type)
+      action.type === 'restart' ||
+      action.type === 'hardDrop' ||
+      PLAYER_ACTIONS.some((type) => type === action.type)
     );
   }
+
+  private readonly dispatchPlannedAction = (action: PlayerAction): GameState => {
+    this.applyingAction = true;
+    try {
+      return this.game.dispatch({ type: action });
+    } finally {
+      this.applyingAction = false;
+    }
+  };
 
   private emit(): void {
     for (const listener of this.listeners) listener(this.getStatus());

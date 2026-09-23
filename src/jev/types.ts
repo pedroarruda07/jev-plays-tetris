@@ -1,27 +1,27 @@
-import type { ModelGameState, PlayerAction } from '../game';
+import type { ModelGameState } from '../game';
+import type { PlacementOption } from '../placements';
 
-export interface JevModelContext extends ModelGameState {
-  /** The last action Jev successfully executed in this autoplay session. */
-  previousAction: PlayerAction | null;
+export interface JevModelContext extends Omit<ModelGameState, 'availableActions'> {
+  placements: PlacementOption[];
 }
 
 export interface JevRequest {
   model: string;
   state: { game: string; goal: string; context: JevModelContext };
   questions: {
-    nextAction: {
+    nextPlacement: {
       type: 'choice';
       instructions: string;
-      criteria: Partial<Record<PlayerAction, string>>;
+      criteria: Record<string, string>;
     };
   };
 }
 
 export interface JevDecision {
-  action: PlayerAction;
-  modelChoice: PlayerAction;
+  placementId: string;
+  modelChoice: string;
   confidence: number;
-  probabilities: Partial<Record<PlayerAction, number>>;
+  probabilities: Record<string, number>;
 }
 
 /** Everything needed to inspect one decision, without authentication headers. */
@@ -37,5 +37,5 @@ export type Decide = (
   state: ModelGameState,
   signal: AbortSignal,
   freezeWhileThinking: boolean,
-  previousAction: PlayerAction | null,
+  placements: readonly PlacementOption[],
 ) => Promise<JevTrace>;

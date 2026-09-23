@@ -103,6 +103,19 @@ describe('Tetris rules', () => {
     expect(dropped.piecesPlaced).toBe(1);
     expect(dropped.score).toBe(0);
   });
+  it('exposes projected ghost cells and soft drop in the model state', () => {
+    const game = new TetrisGame(() => 0.5);
+    const model = game.getModelState();
+    const state = game.getState();
+    const ghost = ghostPiece(state)!;
+    expect(model.ghost).toEqual({ type: ghost.type, cells: cells(ghost) });
+    expect(model.availableActions).toContain('softDrop');
+
+    state.active = ghost;
+    expect(availableActions(state)).toContain('softDrop');
+    const grounded = reduceGame(state, { type: 'softDrop' });
+    expect(grounded.active).toEqual(ghost);
+  });
   it('starts gravity at one second', () => {
     const state = initial();
     let next = reduceGame(state, { type: 'tick', deltaMs: 999 });

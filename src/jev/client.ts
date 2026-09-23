@@ -1,5 +1,5 @@
-import type { ModelGameState, PlayerAction } from '../game';
-import { getJevAvailableActions } from './request';
+import type { ModelGameState } from '../game';
+import type { PlacementOption } from '../placements';
 import { parseJevDecision } from './response';
 import type { JevTrace } from './types';
 import { isRecord } from './validation';
@@ -9,12 +9,12 @@ export async function requestJevDecision(
   state: ModelGameState,
   signal: AbortSignal,
   freezeWhileThinking: boolean,
-  previousAction: PlayerAction | null,
+  placements: readonly PlacementOption[],
 ): Promise<JevTrace> {
   const response = await fetch('/api/jev/decision', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ state, freezeWhileThinking, previousAction }),
+    body: JSON.stringify({ state, freezeWhileThinking, placements }),
     signal,
   });
   const body: unknown = await response.json();
@@ -32,16 +32,24 @@ export async function requestJevDecision(
     !isRecord(body.request)
   )
     throw new Error('Invalid response from the local Jev server.');
-  const decision = parseJevDecision(body.response, getJevAvailableActions(state));
+  const decision = parseJevDecision(
+    body.response,
+    placements.map(({ id }) => id),
+  );
   // The local server creates the request; raw model output is validated above.
   const trace = { ...body, decision } as unknown as JevTrace;
   console.groupCollapsed(
-    `[Jev ${trace.id}] ${decision.action} (${trace.durationMs.toFixed(0)}ms)`,
+    `[Jev ${trace.id}] ${decision.placementId} (${trace.durationMs.toFixed(0)}ms)`,
   );
   console.info('Request sent to TypeSafe AI', trace.request);
   console.info('Raw TypeSafe AI response', trace.response);
   console.table(decision.probabilities);
-  console.info('Selected action', decision.action, 'Confidence', decision.confidence);
+  console.info(
+    'Selected placement',
+    decision.placementId,
+    'Confidence',
+    decision.confidence,
+  );
   console.groupEnd();
   return trace;
 }

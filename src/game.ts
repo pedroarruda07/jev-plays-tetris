@@ -15,7 +15,7 @@ export const PLAYER_ACTIONS: readonly PlayerAction[] = [
   'left',
   'right',
   'rotate',
-  // 'softDrop',
+  'softDrop',
   // 'hardDrop',
   'hold',
 ];
@@ -46,6 +46,7 @@ export interface ModelActivePiece {
 export interface ModelGameState {
   board: Cell[][];
   active: ModelActivePiece | null;
+  ghost: ModelActivePiece | null;
   next: PieceType[];
   hold: PieceType | null;
   canHold: boolean;
@@ -227,12 +228,13 @@ const I_KICKS: Position[][] = [
     [-2, -1],
   ],
 ].map((list) => list.map(([x, y]) => ({ x, y })));
-function move(state: GameState, action: PlayerAction): boolean {
+/** Calculate a legal move without mutating the board or piece. Shared by play and planning. */
+export function movedPiece(state: GameState, action: PlayerAction): Piece | null {
   const active = state.active;
-  if (!active) return false;
+  if (!active) return null;
   let candidate: Piece | undefined;
   if (action === 'rotate') {
-    if (active.type === 'O') return false;
+    if (active.type === 'O') return null;
     const kicks = (active.type === 'I' ? I_KICKS : KICKS)[active.rotation];
     candidate = kicks
       .map((offset) => ({
@@ -250,6 +252,10 @@ function move(state: GameState, action: PlayerAction): boolean {
     };
     if (fits(state, proposed)) candidate = proposed;
   }
+  return candidate ?? null;
+}
+function move(state: GameState, action: PlayerAction): boolean {
+  const candidate = movedPiece(state, action);
   if (!candidate) return false;
   state.active = candidate;
   return true;
@@ -314,24 +320,31 @@ export function reduceGame(
   }
   return state;
 }
-/** Actions that would currently change play; pause/restart remain separate lifecycle actions. */
+/** Legal player inputs; pause/restart remain separate lifecycle actions. */
 export function availableActions(state: GameState): PlayerAction[] {
   if (state.status !== 'playing' || !state.active) return [];
   return PLAYER_ACTIONS.filter((action) => {
     if (action === 'hold') return state.canHold;
-    if (action === 'hardDrop') return true;
+    if (action === 'softDrop' || action === 'hardDrop') return true;
     return move(structuredClone(state), action);
   });
 }
 
 /** A compact, detached snapshot intended to be sent to a model. */
 export function modelGameState(state: GameState): ModelGameState {
+  const ghost = ghostPiece(state);
   return {
     board: state.board.map((row) => [...row]),
     active: state.active
       ? {
           type: state.active.type,
           cells: cells(state.active),
+        }
+      : null,
+    ghost: ghost
+      ? {
+          type: ghost.type,
+          cells: cells(ghost),
         }
       : null,
     next: [...state.next],
