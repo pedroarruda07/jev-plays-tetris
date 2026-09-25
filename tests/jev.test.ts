@@ -10,7 +10,7 @@ import { parseJevDecision } from '../src/jev/response';
 import { parseModelState } from '../src/jev/validation';
 import { JevPlayer } from '../src/jev/player';
 import { JevApiClient, JEV_ENDPOINT } from '../server/jev-client';
-import type { JevTrace } from '../src/jev/types';
+import type { Decide, JevTrace } from '../src/jev/types';
 
 const initial = () => new TetrisGame(() => 0.5);
 function answer(probabilities: Record<string, unknown>, choice = 'left') {
@@ -27,8 +27,9 @@ function answer(probabilities: Record<string, unknown>, choice = 'left') {
   };
 }
 function trace(state: ModelGameState, action: PlayerAction = 'left'): JevTrace {
+  const available = getJevAvailableActions(state);
   const probabilities = Object.fromEntries(
-    getJevAvailableActions(state).map((key) => [key, key === action ? 1 : 0]),
+    available.map((key) => [key, key === action ? 1 : 0]),
   );
   const response = answer(probabilities, action);
   return {
@@ -53,10 +54,13 @@ afterEach(() => {
 
 describe('Jev payload boundary', () => {
   it('preserves fractional lock timing and strips internal or unexpected fields', () => {
-    const state = initial().getModelState();
+    const game = initial();
+    game.dispatch({ type: 'hardDrop' });
+    const state = game.getModelState();
     state.lockElapsedMs = 125.375;
     const parsed = parseModelState({
       ...state,
+      board: [['J']],
       bag: ['I'],
       status: 'playing',
       apiKey: 'not-a-real-key',
@@ -65,20 +69,39 @@ describe('Jev payload boundary', () => {
     expect(payload.state.context).toEqual({
       ...state,
       availableActions: getJevAvailableActions(state),
-      previousAction: null,
+      previousActions: [],
     });
+    expect(Object.keys(payload.questions)).toEqual(['nextAction']);
+    expect(payload.questions.nextAction.type).toBe('choice');
     expect(Object.keys(payload.questions.nextAction.criteria)).toEqual(
       getJevAvailableActions(state),
     );
     expect(payload.state.context).not.toHaveProperty('bag');
     expect(payload.state.context).not.toHaveProperty('apiKey');
-    parsed.board[0][0] = 'T';
-    expect(state.board[0][0]).toBeNull();
-    expect(payload.state.context.board[0][0]).toBeNull();
+    expect(payload.state.context).not.toHaveProperty('board');
+    const firstOccupied = state.occupied[0].x;
+    parsed.occupied[0].x = (firstOccupied + 1) % 10;
+    expect(payload.state.context.occupied[0].x).toBe(firstOccupied);
+    const firstLanding = state.landingPositions[0][0].x;
+    parsed.landingPositions[0][0].x = (firstLanding + 1) % 10;
+    expect(payload.state.context.landingPositions[0][0].x).toBe(firstLanding);
   });
-  it('rejects malformed boards, duplicate cells, and unsupported actions', () => {
+  it('rejects malformed occupied or landing positions and unsupported actions', () => {
     const state = initial().getModelState();
-    expect(() => parseModelState({ ...state, board: [] })).toThrow();
+    expect(() => parseModelState({ ...state, occupied: [{ x: 0, y: -1 }] })).toThrow();
+    expect(() =>
+      parseModelState({
+        ...state,
+        occupied: [
+          { x: 0, y: 0 },
+          { x: 0, y: 0 },
+        ],
+      }),
+    ).toThrow();
+    expect(() => parseModelState({ ...state, landingPositions: [] })).toThrow();
+    expect(() =>
+      parseModelState({ ...state, landingPositions: [[{ x: 0, y: 0 }]] }),
+    ).toThrow();
     expect(() => parseModelState({ ...state, availableActions: ['restart'] })).toThrow();
     expect(() =>
       parseModelState({
@@ -86,6 +109,12 @@ describe('Jev payload boundary', () => {
         active: { type: 'O', cells: Array(4).fill({ x: 0, y: 0 }) },
       }),
     ).toThrow();
+    expect(() =>
+      parseModelState({
+        ...state,
+        ghost: { ...state.ghost!, type: state.active!.type === 'I' ? 'O' : 'I' },
+      }),
+    ).toThrow('matching ghost');
   });
   it('sends the chosen timing mode in the instructions', () => {
     const state = initial().getModelState();
@@ -97,31 +126,49 @@ describe('Jev payload boundary', () => {
     );
   });
   it('includes action history and explains the game and strategy without prior knowledge', () => {
-    const payload = buildJevRequest(
-      initial().getModelState(),
-      'jev-latest',
-      false,
+    const payload = buildJevRequest(initial().getModelState(), 'jev-latest', false, [
+      'left',
+      'left',
       'rotate',
-    );
-    expect(payload.state.context.previousAction).toBe('rotate');
+    ]);
+    expect(payload.state.context.previousActions).toEqual(['left', 'left', 'rotate']);
+    expect(payload.state.context.ghost).toEqual(initial().getModelState().ghost);
     expect(GAME_DESCRIPTION).toContain('One active piece falls automatically');
     expect(GAME_DESCRIPTION).toContain('horizontal row');
     expect(GAME_DESCRIPTION).toContain('game ends');
-    expect(GAME_DESCRIPTION).toContain('previousAction');
+    expect(GAME_DESCRIPTION).toContain('previousActions');
+    expect(GAME_DESCRIPTION).toContain('landingPositions');
+    expect(GAME_DESCRIPTION).toContain('occupied');
+    expect(GAME_DESCRIPTION).toContain('same falling piece until it locks');
     expect(GAME_GOAL).toContain('holes');
     expect(GAME_GOAL).toContain('imminent game over');
+    expect(GAME_DESCRIPTION).toContain('Each response selects one immediate input');
+    expect(payload.questions.nextAction.instructions).toContain(
+      'you will receive a fresh state and can act again',
+    );
+    expect(payload.questions.nextAction.criteria.softDrop).toContain(
+      'Falling sooner alone is not useful',
+    );
+    expect(() =>
+      buildJevRequest(initial().getModelState(), 'jev-latest', false, [
+        'left',
+        'right',
+        'left',
+        'right',
+      ]),
+    ).toThrow('at most 3');
   });
 });
 
-describe('Jev probability selection', () => {
+describe('Jev Choice selection', () => {
   it('uses the highest probability even if choice disagrees, and preserves all probabilities', () => {
-    const decision = parseJevDecision(answer({ left: 0.1, right: 0.9 }), [
-      'left',
-      'right',
-    ]);
-    expect(decision.action).toBe('right');
-    expect(decision.modelChoice).toBe('left');
-    expect(decision.probabilities).toEqual({ left: 0.1, right: 0.9 });
+    const decision = parseJevDecision(
+      answer({ left: 0.4, right: 0.35, rotate: 0.25 }, 'right'),
+      ['left', 'right', 'rotate'],
+    );
+    expect(decision.action).toBe('left');
+    expect(decision.modelChoice).toBe('right');
+    expect(decision.probabilities).toEqual({ left: 0.4, right: 0.35, rotate: 0.25 });
   });
   it('uses the returned choice to break a tie', () => {
     expect(
@@ -135,7 +182,7 @@ describe('Jev probability selection', () => {
     { left: -0.1, right: 1.1 },
     { left: NaN, right: 0.5 },
     { left: 0.1, right: 0.1 },
-  ])('rejects incomplete or invalid distributions: %j', (probabilities) => {
+  ])('rejects incomplete or invalid Choice distributions: %j', (probabilities) => {
     expect(() => parseJevDecision(answer(probabilities), ['left', 'right'])).toThrow();
   });
 });
@@ -195,14 +242,34 @@ describe('Jev play loop', () => {
     player.start();
     await vi.advanceTimersByTimeAsync(1_000);
     expect(decide).toHaveBeenCalledTimes(1);
-    expect(decide.mock.calls[0][3]).toBeNull();
+    expect(decide.mock.calls[0][3]).toEqual([]);
     first.resolve(trace(game.getModelState()));
     await vi.advanceTimersByTimeAsync(0);
     expect(game.getState().active?.x).toBe(2);
     await vi.advanceTimersByTimeAsync(100);
     expect(decide).toHaveBeenCalledTimes(2);
-    expect(decide.mock.calls[1][0].board.flat().filter(Boolean)).toHaveLength(0);
-    expect(decide.mock.calls[1][3]).toBe('left');
+    expect(decide.mock.calls[1][0].occupied).toHaveLength(0);
+    expect(decide.mock.calls[1][3]).toEqual(['left']);
+    player.dispose();
+  });
+  it('keeps only the last three executed actions in chronological order', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    const game = initial();
+    const actions: PlayerAction[] = ['left', 'right', 'left', 'right', 'left'];
+    let actionIndex = 0;
+    const decide = vi.fn<Decide>(async (state) => {
+      const action = actions[actionIndex++] ?? 'softDrop';
+      return trace(state, action);
+    });
+    const player = new JevPlayer(game, decide);
+    player.start();
+    await vi.advanceTimersByTimeAsync(0);
+    for (let index = 0; index < 4; index++) {
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    expect(decide).toHaveBeenCalledTimes(5);
+    expect(decide.mock.calls[4][3]).toEqual(['right', 'left', 'right']);
     player.dispose();
   });
   it('stops and ignores a late reply after a restart, even if transport ignores abort', async () => {

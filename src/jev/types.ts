@@ -1,8 +1,10 @@
 import type { ModelGameState, PlayerAction } from '../game';
 
+export const JEV_ACTION_HISTORY_LIMIT = 3;
+
 export interface JevModelContext extends ModelGameState {
-  /** The last action Jev successfully executed in this autoplay session. */
-  previousAction: PlayerAction | null;
+  /** Successfully executed Jev actions, ordered oldest to newest. */
+  previousActions: PlayerAction[];
 }
 
 export interface JevRequest {
@@ -37,5 +39,5 @@ export type Decide = (
   state: ModelGameState,
   signal: AbortSignal,
   freezeWhileThinking: boolean,
-  previousAction: PlayerAction | null,
+  previousActions: readonly PlayerAction[],
 ) => Promise<JevTrace>;

@@ -15,7 +15,7 @@ try {
     body: JSON.stringify({
       state: game.getModelState(),
       freezeWhileThinking: true,
-      previousAction: null,
+      previousActions: [],
     }),
   });
   const result = await response.json();

@@ -9,12 +9,12 @@ export async function requestJevDecision(
   state: ModelGameState,
   signal: AbortSignal,
   freezeWhileThinking: boolean,
-  previousAction: PlayerAction | null,
+  previousActions: readonly PlayerAction[],
 ): Promise<JevTrace> {
   const response = await fetch('/api/jev/decision', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ state, freezeWhileThinking, previousAction }),
+    body: JSON.stringify({ state, freezeWhileThinking, previousActions }),
     signal,
   });
   const body: unknown = await response.json();

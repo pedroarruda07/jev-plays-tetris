@@ -32,7 +32,7 @@ Touch controls appear on smaller screens. Losing focus pauses the game. Personal
 
 Press `D` to log a detached game state snapshot and the currently available player actions to the browser console immediately and at the configured logging interval. Press `D` again to stop logging.
 
-Press `M` to log the model state on the same schedule. This compact state omits `bag`, `elapsedMs`, `gravityElapsedMs`, `lastClear`, `piecesPlaced`, and `status`. Its `active` piece contains its type and the coordinates of all four occupied cells instead of its rotation and origin. Legal player actions are included as `availableActions`.
+Press `M` to log the model state on the same schedule. This compact state omits `bag`, `elapsedMs`, `gravityElapsedMs`, `lastClear`, `piecesPlaced`, and `status`. It sends locked cells as `occupied` coordinates instead of the full board array. `landingPositions` lists the four cells for each distinct grounded placement reachable by moving or rotating the current piece; these geometric possibilities do not account for the time remaining before lock. `active` and `ghost` contain the four cells they occupy. Legal player actions are included as `availableActions`.
 
 The game uses a 10×20 board, seven colored tetrominoes, a Fisher–Yates 7-bag randomizer, three next pieces, and one hold per falling piece. Clockwise rotations use SRS wall kicks; O stays stationary. Clearing 1/2/3/4 lines awards 100/300/500/800 points, with no drop, combo, T-spin, or level multiplier bonuses.
 
@@ -47,9 +47,9 @@ The **Freeze while thinking** checkbox switches between two modes while playing:
 - Unchecked (default): normal gravity continues during requests. Replies for pieces that have already locked are discarded, and the selected action must still be legal before execution. The piece may have fallen since the request was sent.
 - Checked: gravity and the lock timer pause during each request. Game time advances in the 100ms interval between decisions. Changing the mode cancels the current request and gets a fresh decision.
 
-Only one decision is processed at a time. Each request contains a self-contained explanation of the game and strategy goal, the model-state snapshot, the previously executed Jev action (`null` before the first action), and descriptions of the currently available actions. The action with the highest returned probability is executed; ties use Jev's choice. The loop then captures the next state. Rate limits and overload responses use bounded retries with backoff; a decision times out after 30 seconds.
+Only one request is processed at a time. It contains the game rules and goal, occupied cells, reachable landing positions, the active piece's projected landing cells (`ghost`), up to three previously executed Jev actions, and one Choice question listing the currently legal actions. Jev picks one action per response. The app executes the action with the highest returned probability, using Jev's choice to break ties, then captures a fresh state. Jev can keep positioning the same piece across requests. Rate limits and overload responses use bounded retries with backoff; a request times out after 30 seconds.
 
-Both the **terminal running Vite** and the **browser console** show each exact request body, raw response (including every probability), and selected action. The API key is read on the server and is never placed in the frontend bundle or logs. Keep the key named `JEV_API_KEY`, without a `VITE_` prefix. Optional `JEV_MODEL` defaults to `jev-latest`. Restart Vite after changing `.env`.
+Both the **terminal running Vite** and the **browser console** show each exact request body, raw response, every Choice probability, and the selected action. The API key is read on the server and is never placed in the frontend bundle or logs. Keep the key named `JEV_API_KEY`, without a `VITE_` prefix. Optional `JEV_MODEL` defaults to `jev-latest`. Restart Vite after changing `.env`.
 
 ```ts
 window.jev.start();
@@ -66,7 +66,7 @@ The implementation is divided into small modules:
 | `src/jev/request.ts`    | Game description, goal, action descriptions, exact TypeSafe payload |
 | `src/jev/types.ts`      | Request, decision, and trace contracts                              |
 | `src/jev/validation.ts` | Validates model state received by the server                        |
-| `src/jev/response.ts`   | Validates probabilities and selects the maximum                     |
+| `src/jev/response.ts`   | Validates Choice probabilities and selects the highest              |
 | `server/jev-client.ts`  | Authenticated HTTP transport, retries, cancellation                 |
 | `server/jev-route.ts`   | Local API endpoint and terminal logging                             |
 | `src/jev/client.ts`     | Browser-to-server call and browser logging                          |
@@ -74,7 +74,7 @@ The implementation is divided into small modules:
 | `src/jev/controls.ts`   | Jev button, shortcut, and mode checkbox                             |
 | `vite.config.ts`        | Loads server environment and mounts the API for dev and preview     |
 
-This uses the [TypeSafe Choice API](https://docs.typesafe.ai/primitives/choice) at `POST https://api.typesafe.ai/v1/systemone`. `npm run build` builds the browser app; `npm run preview` runs it with the same server-side Jev route. Hosting only the static `dist/` files will require a separately deployed backend for `/api/jev/decision`.
+This uses the [TypeSafe Choice primitive](https://docs.typesafe.ai/primitives/choice) at `POST https://api.typesafe.ai/v1/systemone`. `npm run build` builds the browser app; `npm run preview` runs it with the same server-side Jev route. Hosting only the static `dist/` files will require a separately deployed backend for `/api/jev/decision`.
 
 `npm run jev:check` makes **one real API request** using your key, logs the trace, and applies its action to an in-memory game. It consumes API usage. The ordinary `npm test` suite uses mocked requests and does not contact TypeSafe AI.
 
@@ -101,4 +101,4 @@ ghostPiece(snapshot); // Predicted landing position.
 
 In the browser, the same instance is exposed as **`window.tetris`**. Use `getState()`, `getModelState()`, `getAvailableActions()`, `dispatch(...)`, and `subscribe(...)` at any point. The interface supplies ticks through its animation loop; pause for stable inspection.
 
-For simulations, use the immutable `createInitialState(rng)` and `reduceGame(state, action, rng)` functions with a seeded RNG. Replay the same actions and random sequence for deterministic results. Save the RNG's own state separately when resuming across future bag refills. Query helpers include `availableActions`, `cells`, `fits`, `ghostPiece`, `isGrounded`, and `gravityInterval`. Engine time advances at event boundaries independently of frame frequency; browser frame deltas are capped at 100ms to avoid catch-up after stalls.
+For simulations, use the immutable `createInitialState(rng)` and `reduceGame(state, action, rng)` functions with a seeded RNG. Replay the same actions and random sequence for deterministic results. Save the RNG's own state separately when resuming across future bag refills. Query helpers include `availableActions`, `cells`, `fits`, `ghostPiece`, `isGrounded`, `gravityInterval`, and `reachableLandings`. Engine time advances at event boundaries independently of frame frequency; browser frame deltas are capped at 100ms to avoid catch-up after stalls.

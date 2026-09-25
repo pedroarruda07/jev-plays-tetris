@@ -5,7 +5,7 @@ import {
   type TetrisGame,
 } from '../game';
 import { requestJevDecision } from './client';
-import type { Decide, JevTrace } from './types';
+import { JEV_ACTION_HISTORY_LIMIT, type Decide, type JevTrace } from './types';
 
 export interface JevPlayerStatus {
   running: boolean;
@@ -31,7 +31,7 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
 export class JevPlayer {
   private runController: AbortController | null = null;
   private lastDecision: JevTrace | null = null;
-  private previousAction: PlayerAction | null = null;
+  private previousActions: PlayerAction[] = [];
   private applyingAction = false;
   private readonly listeners = new Set<(status: JevPlayerStatus) => void>();
   private readonly unsubscribe: () => void;
@@ -96,9 +96,9 @@ export class JevPlayer {
     this.begin(true);
   }
 
-  private begin(resetPreviousAction: boolean): void {
+  private begin(resetActionHistory: boolean): void {
     if (this.status.running) return;
-    if (resetPreviousAction) this.previousAction = null;
+    if (resetActionHistory) this.previousActions = [];
     this.applyingAction = true;
     try {
       const current = this.game.getState();
@@ -142,7 +142,7 @@ export class JevPlayer {
           this.game.getModelState(),
           signal,
           this.status.freezeWhileThinking,
-          this.previousAction,
+          [...this.previousActions],
         );
         if (signal.aborted || this.runController !== controller) return;
         this.lastDecision = structuredClone(trace);
@@ -160,7 +160,9 @@ export class JevPlayer {
           this.applyingAction = true;
           try {
             this.game.dispatch({ type: trace.decision.action });
-            this.previousAction = trace.decision.action;
+            this.previousActions = [...this.previousActions, trace.decision.action].slice(
+              -JEV_ACTION_HISTORY_LIMIT,
+            );
           } finally {
             this.applyingAction = false;
           }

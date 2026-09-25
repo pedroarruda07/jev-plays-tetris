@@ -6,6 +6,7 @@ import {
   fits,
   ghostPiece,
   gravityInterval,
+  reachableLandings,
   reduceGame,
   TetrisGame,
   TYPES,
@@ -102,6 +103,45 @@ describe('Tetris rules', () => {
     for (const { x, y } of cells(ghost)) expect(dropped.board[y][x]).toBe(ghost.type);
     expect(dropped.piecesPlaced).toBe(1);
     expect(dropped.score).toBe(0);
+  });
+  it('exposes projected ghost cells and soft drop in the model state', () => {
+    const game = new TetrisGame(() => 0.5);
+    const model = game.getModelState();
+    const state = game.getState();
+    const ghost = ghostPiece(state)!;
+    expect(model.ghost).toEqual({ type: ghost.type, cells: cells(ghost) });
+    expect(model.occupied).toEqual([]);
+    expect(model).not.toHaveProperty('board');
+    expect(model.landingPositions).toContainEqual(cells(ghost));
+    expect(model.availableActions).toContain('softDrop');
+
+    state.active = ghost;
+    expect(availableActions(state)).toContain('softDrop');
+    const grounded = reduceGame(state, { type: 'softDrop' });
+    expect(grounded.active).toEqual(ghost);
+  });
+  it('lists distinct reachable grounded placements, including rotations', () => {
+    const state = initial();
+    state.active = { type: 'O', rotation: 0, x: 4, y: 0 };
+    const squareLandings = reachableLandings(state);
+    expect(squareLandings).toHaveLength(9);
+    expect(squareLandings.every((landing) => landing.every(({ y }) => y >= 18))).toBe(
+      true,
+    );
+
+    state.active = { type: 'T', rotation: 0, x: 3, y: 0 };
+    const tLandings = reachableLandings(state);
+    const unique = new Set(
+      tLandings.map((landing) =>
+        landing
+          .map(({ x, y }) => `${x},${y}`)
+          .sort()
+          .join('|'),
+      ),
+    );
+    expect(unique.size).toBe(tLandings.length);
+    expect(tLandings.length).toBeGreaterThan(squareLandings.length);
+    expect(tLandings).toContainEqual(cells(ghostPiece(state)!));
   });
   it('starts gravity at one second', () => {
     const state = initial();

@@ -1,5 +1,11 @@
 import { HEIGHT, LOCK_DELAY, PLAYER_ACTIONS, TYPES, WIDTH } from '../game';
-import type { ModelGameState, PieceType, PlayerAction, Position } from '../game';
+import type {
+  ModelActivePiece,
+  ModelGameState,
+  PieceType,
+  PlayerAction,
+  Position,
+} from '../game';
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -27,12 +33,35 @@ function isPosition(value: unknown): value is Position {
   );
 }
 
+function positionKey(position: Position): string {
+  return `${position.x},${position.y}`;
+}
+
+function cellSetKey(positions: Position[]): string {
+  return positions.map(positionKey).sort().join('|');
+}
+
+function isCellSet(value: unknown): value is Position[] {
+  return (
+    Array.isArray(value) &&
+    value.length === 4 &&
+    value.every(isPosition) &&
+    new Set(value.map(positionKey)).size === 4
+  );
+}
+
+function isModelPiece(value: unknown): value is ModelActivePiece {
+  return isRecord(value) && isPieceType(value.type) && isCellSet(value.cells);
+}
+
 /** Validate at the HTTP boundary and copy only model-visible fields. */
 export function parseModelState(value: unknown): ModelGameState {
   if (!isRecord(value)) throw new Error('Expected a model state object.');
   const {
-    board,
+    occupied,
     active,
+    ghost,
+    landingPositions,
     next,
     hold,
     canHold,
@@ -43,25 +72,34 @@ export function parseModelState(value: unknown): ModelGameState {
     availableActions,
   } = value;
   if (
-    !Array.isArray(board) ||
-    board.length !== HEIGHT ||
-    !board.every(
-      (row: unknown) =>
-        Array.isArray(row) &&
-        row.length === WIDTH &&
-        row.every((cell: unknown) => cell === null || isPieceType(cell)),
-    )
-  )
-    throw new Error('Invalid 10 by 20 board.');
-  if (
-    !isRecord(active) ||
-    !isPieceType(active.type) ||
-    !Array.isArray(active.cells) ||
-    active.cells.length !== 4 ||
-    !active.cells.every(isPosition) ||
-    new Set(active.cells.map((p: Position) => `${p.x},${p.y}`)).size !== 4
-  )
+    !Array.isArray(occupied) ||
+    occupied.length > WIDTH * HEIGHT ||
+    !occupied.every(isPosition) ||
+    occupied.some((position: Position) => position.y < 0) ||
+    new Set(occupied.map(positionKey)).size !== occupied.length
+  ) {
+    throw new Error('Expected distinct occupied board positions.');
+  }
+  if (!isModelPiece(active))
     throw new Error('Expected an active tetromino with four distinct cells.');
+  if (!isModelPiece(ghost) || ghost.type !== active.type) {
+    throw new Error('Expected a matching ghost tetromino with four distinct cells.');
+  }
+  const occupiedKeys = new Set(occupied.map(positionKey));
+  if (
+    !Array.isArray(landingPositions) ||
+    !landingPositions.length ||
+    !landingPositions.every(isCellSet) ||
+    new Set(landingPositions.map(cellSetKey)).size !== landingPositions.length ||
+    !landingPositions.some(
+      (landing: Position[]) => cellSetKey(landing) === cellSetKey(ghost.cells),
+    ) ||
+    landingPositions.some((landing: Position[]) =>
+      landing.some((position) => occupiedKeys.has(positionKey(position))),
+    )
+  ) {
+    throw new Error('Expected distinct reachable landing positions including the ghost.');
+  }
   if (!Array.isArray(next) || next.length !== 3 || !next.every(isPieceType)) {
     throw new Error('Expected three next pieces.');
   }
@@ -88,11 +126,18 @@ export function parseModelState(value: unknown): ModelGameState {
     throw new Error('Invalid available actions.');
 
   return {
-    board: board.map((row: (PieceType | null)[]) => [...row]),
+    occupied: occupied.map((position: Position) => ({ x: position.x, y: position.y })),
     active: {
       type: active.type,
       cells: active.cells.map((p: Position) => ({ x: p.x, y: p.y })),
     },
+    ghost: {
+      type: ghost.type,
+      cells: ghost.cells.map((p: Position) => ({ x: p.x, y: p.y })),
+    },
+    landingPositions: landingPositions.map((landing: Position[]) =>
+      landing.map((position) => ({ x: position.x, y: position.y })),
+    ),
     next: [...next],
     hold,
     canHold,

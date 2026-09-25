@@ -5,7 +5,7 @@ import type { PlayerAction } from '../src/game';
 import { buildJevRequest, getJevAvailableActions, JEV_ACTIONS } from '../src/jev/request';
 import { parseJevDecision } from '../src/jev/response';
 import { isPlayerAction, isRecord, parseModelState } from '../src/jev/validation';
-import type { JevTrace } from '../src/jev/types';
+import { JEV_ACTION_HISTORY_LIMIT, type JevTrace } from '../src/jev/types';
 import { JevApiClient, JevApiError } from './jev-client';
 
 export const JEV_ROUTE = '/api/jev/decision';
@@ -61,21 +61,23 @@ export function jevPlugin(apiKey: string, model: string): Plugin {
     }
     let state;
     let freezeWhileThinking;
-    let previousAction: PlayerAction | null;
+    let previousActions: PlayerAction[];
     try {
       const body = await readBody(request);
       if (
         !isRecord(body) ||
         typeof body.freezeWhileThinking !== 'boolean' ||
-        (body.previousAction !== null &&
-          (!isPlayerAction(body.previousAction) ||
-            !JEV_ACTIONS.includes(body.previousAction)))
+        !Array.isArray(body.previousActions) ||
+        body.previousActions.length > JEV_ACTION_HISTORY_LIMIT ||
+        !body.previousActions.every(
+          (action) => isPlayerAction(action) && JEV_ACTIONS.includes(action),
+        )
       ) {
-        throw new Error('Expected state, freezeWhileThinking, and previousAction.');
+        throw new Error('Expected state, freezeWhileThinking, and previousActions.');
       }
       state = parseModelState(body.state);
       freezeWhileThinking = body.freezeWhileThinking;
-      previousAction = body.previousAction;
+      previousActions = [...body.previousActions] as PlayerAction[];
     } catch (error) {
       json(response, 400, {
         error: error instanceof Error ? error.message : 'Invalid model state.',
@@ -89,7 +91,7 @@ export function jevPlugin(apiKey: string, model: string): Plugin {
     response.on('close', () => {
       if (!response.writableEnded) controller.abort();
     });
-    const payload = buildJevRequest(state, model, freezeWhileThinking, previousAction);
+    const payload = buildJevRequest(state, model, freezeWhileThinking, previousActions);
     console.info(`[Jev ${id}] REQUEST\n${JSON.stringify(payload, null, 2)}`);
     try {
       const raw = await client.evaluate(payload, controller.signal);

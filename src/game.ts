@@ -15,7 +15,7 @@ export const PLAYER_ACTIONS: readonly PlayerAction[] = [
   'left',
   'right',
   'rotate',
-  // 'softDrop',
+  'softDrop',
   // 'hardDrop',
   'hold',
 ];
@@ -44,8 +44,10 @@ export interface ModelActivePiece {
   cells: Position[];
 }
 export interface ModelGameState {
-  board: Cell[][];
+  occupied: Position[];
   active: ModelActivePiece | null;
+  ghost: ModelActivePiece | null;
+  landingPositions: Position[][];
   next: PieceType[];
   hold: PieceType | null;
   canHold: boolean;
@@ -254,6 +256,41 @@ function move(state: GameState, action: PlayerAction): boolean {
   state.active = candidate;
   return true;
 }
+
+const POSITIONING_ACTIONS = ['left', 'right', 'rotate', 'softDrop'] as const;
+
+/** Distinct grounded cell sets reachable through legal inputs from the current pose. */
+export function reachableLandings(state: GameState): Position[][] {
+  if (state.status !== 'playing' || !state.active) return [];
+
+  const pending: Piece[] = [{ ...state.active }];
+  const visited = new Set<string>();
+  const landings = new Map<string, Position[]>();
+
+  for (let index = 0; index < pending.length; index++) {
+    const piece = pending[index];
+    const poseKey = `${piece.x},${piece.y},${piece.rotation}`;
+    if (visited.has(poseKey)) continue;
+    visited.add(poseKey);
+
+    if (!fits(state, { ...piece, y: piece.y + 1 })) {
+      const positions = cells(piece);
+      const key = positions
+        .map(({ x, y }) => `${x},${y}`)
+        .sort()
+        .join('|');
+      if (!landings.has(key)) landings.set(key, positions);
+    }
+
+    for (const action of POSITIONING_ACTIONS) {
+      // move only changes active, so share the read-only board during the search.
+      const candidate = { ...state, active: piece };
+      if (move(candidate, action)) pending.push(candidate.active!);
+    }
+  }
+
+  return [...landings.values()];
+}
 function tick(state: GameState, deltaMs: number, random: Random): void {
   if (!Number.isFinite(deltaMs) || deltaMs <= 0) return;
   let remaining = deltaMs;
@@ -314,26 +351,36 @@ export function reduceGame(
   }
   return state;
 }
-/** Actions that would currently change play; pause/restart remain separate lifecycle actions. */
+/** Legal player inputs; pause/restart remain separate lifecycle actions. */
 export function availableActions(state: GameState): PlayerAction[] {
   if (state.status !== 'playing' || !state.active) return [];
   return PLAYER_ACTIONS.filter((action) => {
     if (action === 'hold') return state.canHold;
-    if (action === 'hardDrop') return true;
+    if (action === 'softDrop' || action === 'hardDrop') return true;
     return move(structuredClone(state), action);
   });
 }
 
 /** A compact, detached snapshot intended to be sent to a model. */
 export function modelGameState(state: GameState): ModelGameState {
+  const ghost = ghostPiece(state);
   return {
-    board: state.board.map((row) => [...row]),
+    occupied: state.board.flatMap((row, y) =>
+      row.flatMap((cell, x) => (cell === null ? [] : [{ x, y }])),
+    ),
     active: state.active
       ? {
           type: state.active.type,
           cells: cells(state.active),
         }
       : null,
+    ghost: ghost
+      ? {
+          type: ghost.type,
+          cells: cells(ghost),
+        }
+      : null,
+    landingPositions: reachableLandings(state),
     next: [...state.next],
     hold: state.hold,
     canHold: state.canHold,

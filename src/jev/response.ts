@@ -6,7 +6,7 @@ function probability(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
-/** Reject malformed distributions and select their maximum without sampling. */
+/** Validate the Choice distribution and execute its highest-probability action. */
 export function parseJevDecision(raw: unknown, allowed: PlayerAction[]): JevDecision {
   if (!isRecord(raw) || !isRecord(raw.answers) || !isRecord(raw.answers.nextAction)) {
     throw new Error('Jev response is missing answers.nextAction.');
@@ -18,8 +18,9 @@ export function parseJevDecision(raw: unknown, allowed: PlayerAction[]): JevDeci
     !allowed.includes(answer.choice) ||
     !probability(answer.confidence) ||
     !isRecord(answer.probabilities)
-  )
+  ) {
     throw new Error('Jev returned an invalid Choice answer.');
+  }
 
   const probabilities: Partial<Record<PlayerAction, number>> = {};
   const entries = Object.entries(answer.probabilities);
