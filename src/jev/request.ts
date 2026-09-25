@@ -25,16 +25,14 @@ export const GAME_DESCRIPTION = [
   'A 7-bag randomizer supplies one of each shape before reshuffling. next lists the next',
   'three pieces in spawn order. hold is the saved piece, and canHold says whether hold is',
   'currently legal; hold can be used only once before the active piece locks.',
-  'Your choices are final placements, not individual movement buttons. placements lists',
-  'reachable landings calculated by the game engine.',
-  'Each placement has an id, usesHold, landing (type and four coordinates before rows clear),',
-  'linesCleared, scoreGain, gameOver, metrics, and boardAfter. usesHold means exchanging the',
-  'current piece with hold (or next when hold is empty) before placing it.',
+  'Your choices are final placements, not individual movement buttons. Each choice describes',
+  'whether it uses hold, the piece and its four landing coordinates before rows disappear,',
+  'boardAfter (the resulting locked board after normal row removal), and board-shape metrics.',
   'boardAfter uses 20 strings of 10 cells, top to bottom: dot is empty; letters are locked cells.',
-  'Metrics describe that board AFTER line clearing: holes are empty cells below locked cells;',
-  'columnHeights are heights from the floor; maxHeight is their maximum; aggregateHeight is',
-  'their sum; bumpiness is the sum of absolute differences between neighboring column heights.',
-  'gameOver includes both locking above the top and obstructing the next spawn.',
+  'usesHold means exchanging the current piece with hold (or next when hold is empty) first.',
+  'holes counts empty cells below locked cells. columnHeights lists the height of each column',
+  'from left to right. maxHeight is the tallest column, aggregateHeight is the sum of all',
+  'column heights, and bumpiness is the total height difference between neighboring columns.',
   'Clearing 1/2/3/4 rows at once earns',
   '100/300/500/800 points, with no drop, combo, T-spin or level multiplier bonuses.',
   'Gravity starts at one row per second and speeds up by 65ms every five lines.',
@@ -54,8 +52,9 @@ export const GAME_GOAL = [
   'columns, and overhangs that trap empty space. Use the next-three preview and hold slot to',
   'plan beyond the active piece. Give highest priority to avoiding imminent game over, then',
   'to clearing rows and reducing holes, stack height, and surface unevenness.',
-  'Compare the supplied resulting boards and measured consequences. Avoid gameOver placements',
-  'whenever a surviving option exists. Use next and hold to judge future flexibility.',
+  'Compare the supplied resulting boards and board-shape measurements. Infer line clears,',
+  'scoring value, survival risk, and future flexibility from the board and the game rules.',
+  'Use the next-three preview and hold information when judging future flexibility.',
   'The ghost is only the current straight-down landing; it has no preference over alternatives.',
 ].join(' ');
 
@@ -86,7 +85,6 @@ export function buildJevRequest(
     lines: snapshot.lines,
     level: snapshot.level,
     lockElapsedMs: snapshot.lockElapsedMs,
-    placements: structuredClone([...placements]),
   };
   return {
     model,
@@ -95,20 +93,24 @@ export function buildJevRequest(
       nextPlacement: {
         type: 'choice',
         instructions:
-          'Which supplied final placement best advances the game goal? Compare gameOver, ' +
-          'linesCleared, scoreGain, holes, height, bumpiness, and the resulting board. ' +
-          'Select its id; the controller executes the path. ' +
+          'Which supplied final placement best advances the game goal? Inspect each landing ' +
+          'and resulting board. Compare holes, column heights, maximum height, aggregate ' +
+          'height, and bumpiness. Work out line clears, score gain, and survival risk ' +
+          'yourself, then select the placement id. The controller executes the path. ' +
           (freezeWhileThinking
             ? 'The game clock is frozen during this decision and resumes for execution and locking.'
             : 'Gravity continues during the decision; the controller rechecks reachability before execution.'),
         criteria: Object.fromEntries(
           placements.map((placement) => [
             placement.id,
-            `${placement.usesHold ? 'Use hold, then place' : 'Place'} ${placement.landing.type} at ` +
-              `${JSON.stringify(placement.landing.cells)}. Clears ${placement.linesCleared} rows; ` +
-              `gains ${placement.scoreGain} points; gameOver=${placement.gameOver}; ` +
-              `holes=${placement.metrics.holes}; maxHeight=${placement.metrics.maxHeight}; ` +
-              `aggregateHeight=${placement.metrics.aggregateHeight}; bumpiness=${placement.metrics.bumpiness}.`,
+            `${placement.usesHold ? 'Uses hold.' : 'Does not use hold.'} ` +
+              `Landing: ${placement.landing.type} at ${JSON.stringify(placement.landing.cells)}. ` +
+              `Board after locking and row removal, top to bottom:\n${placement.boardAfter.join('\n')}\n` +
+              `Board shape: holes=${placement.metrics.holes}; ` +
+              `columnHeights=${JSON.stringify(placement.metrics.columnHeights)}; ` +
+              `maxHeight=${placement.metrics.maxHeight}; ` +
+              `aggregateHeight=${placement.metrics.aggregateHeight}; ` +
+              `bumpiness=${placement.metrics.bumpiness}.`,
           ]),
         ),
       },

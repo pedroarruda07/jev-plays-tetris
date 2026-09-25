@@ -1,9 +1,7 @@
 import type { ModelGameState } from '../game';
 import type { PlacementOption } from '../placements';
 
-export interface JevModelContext extends Omit<ModelGameState, 'availableActions'> {
-  placements: PlacementOption[];
-}
+export type JevModelContext = Omit<ModelGameState, 'availableActions'>;
 
 export interface JevRequest {
   model: string;

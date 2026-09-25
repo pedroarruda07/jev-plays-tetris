@@ -74,7 +74,6 @@ describe('Jev payload boundary', () => {
       lines: state.lines,
       level: state.level,
       lockElapsedMs: state.lockElapsedMs,
-      placements: candidates,
     });
     expect(Object.keys(payload.questions.nextPlacement.criteria)).toEqual(
       candidates.map((p) => p.id),
@@ -86,11 +85,25 @@ describe('Jev payload boundary', () => {
     expect(payload.state.context).not.toHaveProperty('bag');
     expect(payload.state.context).not.toHaveProperty('apiKey');
     expect(payload.state.context).not.toHaveProperty('availableActions');
+    expect(payload.state.context).not.toHaveProperty('placements');
+    const firstCriterion = payload.questions.nextPlacement.criteria[candidates[0].id];
+    expect(firstCriterion).toContain(candidates[0].boardAfter.join('\n'));
+    expect(firstCriterion).toContain(JSON.stringify(candidates[0].landing.cells));
+    expect(firstCriterion).toContain(`holes=${candidates[0].metrics.holes}`);
+    expect(firstCriterion).toContain(
+      `columnHeights=${JSON.stringify(candidates[0].metrics.columnHeights)}`,
+    );
+    expect(firstCriterion).toContain(`maxHeight=${candidates[0].metrics.maxHeight}`);
+    expect(firstCriterion).toContain(
+      `aggregateHeight=${candidates[0].metrics.aggregateHeight}`,
+    );
+    expect(firstCriterion).toContain(`bumpiness=${candidates[0].metrics.bumpiness}`);
+    expect(firstCriterion).not.toMatch(/linesCleared|scoreGain|gameOver/);
     parsed.board[0][0] = 'T';
     candidates[0].landing.cells[0].x = 9;
     expect(payload.state.context.board[0][0]).toBeNull();
-    expect(payload.state.context.placements[0].landing.cells).not.toEqual(
-      candidates[0].landing.cells,
+    expect(payload.questions.nextPlacement.criteria[candidates[0].id]).toBe(
+      firstCriterion,
     );
   });
   it('validates candidate limits, duplicate IDs, geometry and metrics, stripping paths', () => {
